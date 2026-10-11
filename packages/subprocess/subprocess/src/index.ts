@@ -41,7 +41,20 @@ export type {
  * deliberately supplied entry survives because explicit env layers merge
  * after the scrub.
  */
-export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i
+export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN|CREDENTIAL|DATABASE|CONNECTION/i
+
+/**
+ * Connection strings embed their credential in the value (`scheme://user:pass@host`)
+ * under names that carry none of the credential words above, so the name-based
+ * pattern alone would forward e.g. `DATABASE_URL` to children. Any value whose
+ * prefix carries `user:password@` userinfo is treated as a credential regardless
+ * of its name; benign URLs without `:password@` userinfo still survive.
+ */
+const CREDENTIAL_URL_VALUE_PATTERN = /^[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@/i
+
+function carriesEmbeddedCredential(value: string): boolean {
+  return CREDENTIAL_URL_VALUE_PATTERN.test(value)
+}
 
 /**
  * The ambient parent environment minus credential-shaped names and minus all
@@ -52,7 +65,9 @@ export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i
  * which merges after this scrub). Both scrubs match case-insensitively:
  * Windows environment names are case-insensitive, so a parent `dsh_*` entry
  * would otherwise survive and read back as `$env:DSH_*` in the child;
- * deliberate lowercase `dsh_*` names on POSIX are implausible. Exported as a plain function so spawners
+ * deliberate lowercase `dsh_*` names on POSIX are implausible. Values that
+ * embed `user:password@` credentials (connection strings) are also dropped
+ * even when their name looks innocuous. Exported as a plain function so spawners
  * that cannot route through the service (node-pty backends, SDK-managed
  * transports) share the one scrub definition.
  * @returns a fresh environment object safe to hand to a child spawn.
@@ -60,7 +75,11 @@ export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i
 export function scrubbedParentEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && !SENSITIVE_ENV_PATTERN.test(key) && !key.toUpperCase().startsWith(DSH_ENV_PREFIX)) env[key] = value
+    if (value === undefined) continue
+    if (SENSITIVE_ENV_PATTERN.test(key)) continue
+    if (carriesEmbeddedCredential(value)) continue
+    if (key.toUpperCase().startsWith(DSH_ENV_PREFIX)) continue
+    env[key] = value
   }
   return env
 }

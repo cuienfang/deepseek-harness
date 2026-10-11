@@ -97,4 +97,20 @@ describe('SubprocessRuntime seam', () => {
       delete process.env.SCRUB_PROBE_PLAIN
     }
   })
+
+  it('scrubbedParentEnv drops connection strings whose credentials hide in the value', () => {
+    process.env.DATABASE_URL = 'postgresql://winkppt:hunter2@postgres:5432/winkppt'
+    process.env.DSH_DATABASE_URL = 'postgresql://winkppt:hunter2@postgres:5432/winkppt'
+    process.env.SCRUB_PROBE_URL = 'https://example.test/no-credentials-here'
+    try {
+      const env = scrubbedParentEnv()
+      expect(env.DATABASE_URL).toBeUndefined()
+      expect(env.DSH_DATABASE_URL).toBeUndefined()
+      expect(env.SCRUB_PROBE_URL).toBe('https://example.test/no-credentials-here')
+    } finally {
+      delete process.env.DATABASE_URL
+      delete process.env.DSH_DATABASE_URL
+      delete process.env.SCRUB_PROBE_URL
+    }
+  })
 })
